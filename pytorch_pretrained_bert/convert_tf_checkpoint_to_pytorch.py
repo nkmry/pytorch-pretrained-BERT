@@ -30,6 +30,7 @@ from .modeling import BertConfig, BertForPreTraining
 def convert_tf_checkpoint_to_pytorch(tf_checkpoint_path, bert_config_file, pytorch_dump_path):
     config_path = os.path.abspath(bert_config_file)
     tf_path = os.path.abspath(tf_checkpoint_path)
+    pytorch_dump_path = os.path.abspath(pytorch_dump_path)
     print("Converting TensorFlow checkpoint from {} with config at {}".format(tf_path, config_path))
     # Load weights from TF model
     init_vars = tf.train.list_variables(tf_path)
@@ -48,8 +49,11 @@ def convert_tf_checkpoint_to_pytorch(tf_checkpoint_path, bert_config_file, pytor
 
     for name, array in zip(names, arrays):
         name = name.split('/')
-        # adam_v and adam_m are variables used in AdamWeightDecayOptimizer to calculated m and v
-        # which are not required for using pretrained model
+        # adam_v and adam_m are variables used in AdamWeightDecayOptimizer to
+        # calculated m and v which are not required for using pretrained model.
+        # global_step is a variable containing training steps which is used
+        # when the training is resumed. So, it is not required for using
+        # pretrianed model.
         if any(n in ["adam_v", "adam_m", "global_step"] for n in name):
             print("Skipping {}".format("/".join(name)))
             continue
