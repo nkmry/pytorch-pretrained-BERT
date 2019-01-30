@@ -23,6 +23,8 @@ import os
 import logging
 import argparse
 from tqdm import tqdm, trange
+from importlib.util import spec_from_file_location, module_from_spec
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -484,6 +486,11 @@ def main():
                         help = "Loss scaling to improve fp16 numeric stability. Only used when fp16 set to True.\n"
                         "0 (default value): dynamic loss scaling.\n"
                         "Positive power of 2: static loss scaling value.\n")
+    parser.add_argument('--japanese',
+                        action='store_true',
+                        help="Whether to use Japanese pre-trained model."
+                             "If you use it, set a dir containing the model"
+                             "files to `--bert_model`")
 
     args = parser.parse_args()
 
@@ -518,7 +525,26 @@ def main():
         raise ValueError("Output directory ({}) already exists and is not empty.".format(args.output_dir))
     os.makedirs(args.output_dir, exist_ok=True)
 
-    tokenizer = BertTokenizer.from_pretrained(args.bert_model, do_lower_case=args.do_lower_case)
+    if args.japanese:
+        spec = spec_from_file_location(
+            'tokenization_sentencepiece',
+            '../bert-japanese/src/tokenization_sentencepiece.py')
+        tokenization = module_from_spec(spec)
+        spec.loader.exec_module(tokenization)
+        model_dir = Path(args.bert_model)
+        if not model_dir.is_dir():
+            raise FileNotFoundError(args.bert_model)
+        sp_files = {k: None for k in ['model', 'vocab']}
+        for k in sp_files.keys():
+            globs = list(model_dir.glob("*." + k))
+            if len(globs) != 1:
+                raise FileExistsError(
+                    "There are several files matching to `*.{}`".format(k))
+            sp_files[k] = str(globs[0])
+        tokenizer = tokenization.FullTokenizer(model_file=sp_files['model'],
+                                               vocab_file=sp_files['vocab'])
+    else:
+        tokenizer = BertTokenizer.from_pretrained(args.bert_model, do_lower_case=args.do_lower_case)
 
     #train_examples = None
     num_train_steps = None
