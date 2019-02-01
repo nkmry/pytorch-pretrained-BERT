@@ -305,8 +305,8 @@ def random_word(tokens, tokenizer):
                 output_label.append(tokenizer.vocab[token])
             except KeyError:
                 # For unknown words (should not occur with BPE vocab)
-                output_label.append(tokenizer.vocab["[UNK]"])
-                logger.warning("Cannot find token '{}' in vocab. Using [UNK] insetad".format(token))
+                output_label.append(tokenizer.vocab["<unk>"])
+                logger.warning("Cannot find token '{}' in vocab. Using <unk> insetad".format(token))
         else:
             # no masking token (will be ignored by loss function later)
             output_label.append(-1)
