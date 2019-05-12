@@ -16,12 +16,14 @@
 from __future__ import (absolute_import, division, print_function,
                         unicode_literals)
 
+from typing import List
 import sys
 import json
 import logging
 import os
 import regex as re
 from io import open
+import sentencepiece as spm
 
 try:
     from functools import lru_cache
@@ -302,3 +304,34 @@ class GPT2Tokenizer(object):
                 index += 1
 
         return vocab_file, merge_file, special_tokens_file
+
+
+class GPT2SpTokenizer(GPT2Tokenizer):
+    """
+    Sentencepice tokenizer for GPT-2
+    """
+    def __init__(self, pretrained_model_path: str, special_tokens: List[str]):
+        self.encoder = spm.SentencePieceProcessor()
+        self.encoder.load(pretrained_model_path)
+        self.special_tokens = {}
+        self.special_tokens_decoder = {}
+        self.set_special_tokens(special_tokens)
+
+    def tokenize(self, text):
+        return self.encoder.EncodeAsPieces(text)
+
+    def convert_tokens_to_ids(self, tokens):
+        if isinstance(tokens, str) or\
+                (sys.version_info[0] == 2 and isinstance(tokens, unicode)):
+            if tokens in self.special_tokens:
+                return self.special_tokens[tokens]
+            else:
+                return self.encoder.PieceToId(tokens)
+        return [self.special_tokens[t] if t in self.special_tokens
+                else self.encoder.PieceToId(t) for t in tokens]
+
+    @classmethod
+    def from_pretrained(cls, pretrained_model_path: str, *inputs, **kwargs):
+        return cls(pretrained_model_path)
+
+
