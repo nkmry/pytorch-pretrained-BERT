@@ -2,7 +2,7 @@ __version__ = "0.6.2"
 from .tokenization import BertTokenizer, BasicTokenizer, WordpieceTokenizer
 from .tokenization_openai import OpenAIGPTTokenizer
 from .tokenization_transfo_xl import (TransfoXLTokenizer, TransfoXLCorpus)
-from .tokenization_gpt2 import GPT2Tokenizer
+from .tokenization_gpt2 import GPT2Tokenizer, GPT2SpTokenizer
 
 from .modeling import (BertConfig, BertModel, BertForPreTraining,
                        BertForMaskedLM, BertForNextSentencePrediction,
