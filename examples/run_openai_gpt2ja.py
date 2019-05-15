@@ -46,8 +46,8 @@ class SentensepieceSplitter(WordSplitter):
         self.sp = spm.SentencePieceProcessor()
         self.sp.load(pretrained_model_path)
 
-    def split_words(self, sentence: str):
-        return [e for e in self.sp.EncodeAsPieces(sentence) if e != "_"]
+    def split_words(self, sentence: str) -> List[Token]:
+        return [Token(e) for e in self.sp.EncodeAsPieces(sentence) if e != "▁"]
 
 
 class GPT2LMHeadModel(Model):
@@ -61,21 +61,15 @@ class GPT2LMHeadModel(Model):
                 input_tokens: Dict[str, Tensor],
                 output_tokens: Dict[str, Tensor] = None) -> Dict[str, Tensor]:
         mask = get_text_field_mask(input_tokens)
-        if output_tokens is not None:
-            loss = self.lm(input_ids=input_tokens['tokens'],
-                           lm_labels=output_tokens['tokens'])
-        else:
-            pass
         hidden_states, presents = self.transformer(
             input_ids=input_tokens['tokens'])
         lm_logits = self.lm_head(hidden_states)
         output = {'lm_logits': lm_logits}
         if output_tokens is not None:
+            self.accuracy(lm_logits, output_tokens['tokens'], mask)
             # Shift so that tokens < n predict n
             shift_logits = lm_logits[:, :-1].contiguous()
             shift_labels = output_tokens['tokens'][:, 1:].contiguous()
-            self.accuracy(shift_logits, shift_labels, mask)
-
             # Flatten the tokens
             loss_fct = CrossEntropyLoss(ignore_index=-1)
             output['loss'] = loss_fct(shift_logits.view(-1, shift_logits.size(-1)),
@@ -89,12 +83,13 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--sp_model', type=str, required=True,
                         help='a path to Sentencepeice model')
+    parser.add_argument("--vocab_dir", default=None, type=str)
     parser.add_argument("--output_dir", default=None, type=str, required=True,
                         help="The output directory where the model predictions and checkpoints will be written.")
     parser.add_argument('--train_dataset', type=str, default='')
     parser.add_argument('--eval_dataset', type=str, default='')
     parser.add_argument('--seed', type=int, default=42)
-    parser.add_argument('--num_train_epochs', type=int, default=3)
+    parser.add_argument('--num_train_epochs', type=int, default=100)
     parser.add_argument('--train_batch_size', type=int, default=8)
     parser.add_argument('--eval_batch_size', type=int, default=16)
     parser.add_argument('--max_grad_norm', type=int, default=1)
@@ -124,12 +119,28 @@ def main():
     if not os.path.exists(args.output_dir):
         os.makedirs(args.output_dir)
 
-    # Load tokenizer and model
-    # This loading functions also add new tokens and embeddings called `special tokens`
-    # These new embeddings will be fine-tuned on the RocStories dataset
+    # Load tokenizer
     special_tokens = ['_start_', '_delimiter_', '_classify_']
     tokenizer = GPT2SpTokenizer(args.sp_model, special_tokens)
     special_tokens_ids = list(tokenizer.convert_tokens_to_ids(token) for token in special_tokens)
+
+    num_sentences = int(subprocess.check_output(
+        ['wc', '-l', args.train_dataset], encoding='utf-8').split()[0])
+    instances_per_epoch = int(num_sentences / args.num_train_epochs)
+
+    reader = LanguageModelingReader(tokenizer=WordTokenizer(
+        word_splitter=SentensepieceSplitter(args.sp_model)), lazy=True)
+    train_dataset = reader.read(args.train_dataset)
+    if hasattr(args, 'vocab_dir'):
+        vocab = Vocabulary.from_files(args.vocab_dir)
+    else:
+        vocab = Vocabulary.from_instances(train_dataset)
+        vocab.save_to_files(str(Path(args.output_dir) / 'vocab'))
+    iterator = BucketIterator(sorting_keys=[("input_tokens", "num_tokens")],
+                              batch_size=args.train_batch_size,
+                              instances_per_epoch=instances_per_epoch)
+    iterator.index_with(vocab)
+    # Prepare model and optimizer
     model = GPT2LMHeadModel(GPT2Config(**{
         "initializer_range": 0.02,
         "layer_norm_epsilon": 1e-05,
@@ -139,20 +150,8 @@ def main():
         "n_layer": 12,
         "n_positions": 1024,
         "vocab_size_or_config_json_file": len(tokenizer)
-    }))
+    }), vocab)
     model.to(device)
-
-    num_sentences = int(subprocess.check_output(
-        ['wc', '-l', args.train_dataset], encoding='utf-8').split()[0])
-    reader = LanguageModelingReader(tokenizer=WordTokenizer(
-        word_splitter=SentensepieceSplitter(args.sp_model)), lazy=True)
-    train_dataset = reader.read(args.train_dataset)
-    vocab = Vocabulary.from_instances(train_dataset)
-    iterator = BucketIterator(sorting_keys=[("input_tokens", "num_tokens")],
-                              batch_size=args.train_batch_size,
-                              instances_per_epoch=num_sentences)
-    iterator.index_with(vocab)
-    # Prepare optimizer
     param_optimizer = list(model.named_parameters())
     no_decay = ['bias', 'LayerNorm.bias', 'LayerNorm.weight']
     optimizer_grouped_parameters = [
@@ -164,7 +163,7 @@ def main():
          'weight_decay': 0.0}
     ]
     num_train_optimization_steps =\
-        len(train_dataset) * args.num_train_epochs // args.train_batch_size
+        num_sentences * args.num_train_epochs // args.train_batch_size
     optimizer = OpenAIAdam(optimizer_grouped_parameters,
                            lr=args.learning_rate,
                            warmup=args.warmup_proportion,
@@ -177,7 +176,7 @@ def main():
                       iterator=iterator,
                       train_dataset=train_dataset,
                       patience=1,
-                      num_epochs=20,
+                      num_epochs=args.num_train_epochs,
                       cuda_device=cuda_device,
                       serialization_dir=args.output_dir)
     trainer.train()
@@ -185,7 +184,6 @@ def main():
     #save
     with (Path(args.output_dir) / "model.th").open('wb') as f:
         torch.save(model.state_dict(), f)
-    vocab.save_to_files(args.output_dir)
 
 
 if __name__ == "__main__":

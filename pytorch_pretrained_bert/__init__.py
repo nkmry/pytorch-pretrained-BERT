@@ -16,7 +16,7 @@ from .modeling_transfo_xl import (TransfoXLConfig, TransfoXLModel, TransfoXLLMHe
                                   load_tf_weights_in_transfo_xl)
 from .modeling_gpt2 import (GPT2Config, GPT2Model,
                             GPT2LMHeadModel, GPT2DoubleHeadsModel,
-                            load_tf_weights_in_gpt2)
+                            GPT2LMHead, load_tf_weights_in_gpt2)
 
 from .optimization import BertAdam
 from .optimization_openai import OpenAIAdam
